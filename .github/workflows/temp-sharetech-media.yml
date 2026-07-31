@@ -1,0 +1,66 @@
+name: Temporary ShareTech media transcode
+
+on:
+  pull_request:
+    paths:
+      - "tmp/run-sharetech-media"
+
+permissions:
+  contents: read
+
+jobs:
+  transcode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download source media
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --retry-all-errors \
+            --output hero-source.mp4 \
+            "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260729_102822_0e6c87e8-c141-4744-bf32-ad30db296371.mp4"
+          test -s hero-source.mp4
+
+      - name: Probe source
+        run: |
+          mkdir -p output
+          ffprobe -v error -show_format -show_streams -of json hero-source.mp4 | tee output/source-probe.json
+
+      - name: Encode scrub-optimized desktop master
+        run: |
+          ffmpeg -hide_banner -y -i hero-source.mp4 -map 0:v:0 -an \
+            -c:v libx264 -preset slow -crf 11 \
+            -g 1 -keyint_min 1 -sc_threshold 0 \
+            -pix_fmt yuv420p -movflags +faststart \
+            output/hero-scrub-1080.mp4
+
+      - name: Encode scrub-optimized mobile master
+        run: |
+          ffmpeg -hide_banner -y -i hero-source.mp4 -map 0:v:0 -an \
+            -vf "scale='min(1280,iw)':-2:flags=lanczos" \
+            -c:v libx264 -preset slow -crf 12 \
+            -g 1 -keyint_min 1 -sc_threshold 0 \
+            -pix_fmt yuv420p -movflags +faststart \
+            output/hero-scrub-720.mp4
+
+      - name: Verify encoded media
+        run: |
+          set -euo pipefail
+          ffprobe -v error -show_format -show_streams -of json output/hero-scrub-1080.mp4 > output/desktop-probe.json
+          ffprobe -v error -show_format -show_streams -of json output/hero-scrub-720.mp4 > output/mobile-probe.json
+          sha256sum output/* > output/SHA256SUMS.txt
+          ls -lh output
+
+      - name: Upload optimized media
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharetech-scrub-media
+          path: output/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
