@@ -54,17 +54,29 @@ jobs:
           set -euo pipefail
           ffprobe -v error -show_format -show_streams -of json output/hero-scrub-1080.mp4 > output/desktop-probe.json
           ffprobe -v error -show_format -show_streams -of json output/hero-scrub-720.mp4 > output/mobile-probe.json
-          ffprobe -v error -select_streams v:0 -show_entries frame=key_frame -of csv=p=0 output/hero-scrub-1080.mp4 | sort | uniq -c > output/desktop-keyframes.txt
-          ffprobe -v error -select_streams v:0 -show_entries frame=key_frame -of csv=p=0 output/hero-scrub-720.mp4 | sort | uniq -c > output/mobile-keyframes.txt
-          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-1080.mp4 -lavfi ssim -f null - 2> output/desktop-ssim.txt
-          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-1080.mp4 -lavfi psnr -f null - 2> output/desktop-psnr.txt
-          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-720.mp4 -lavfi "[0:v]scale=1280:720:flags=lanczos[ref];[ref][1:v]ssim" -f null - 2> output/mobile-ssim.txt
+
+          desktop_total="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 output/hero-scrub-1080.mp4 | tr -d '\r')"
+          desktop_keys="$(ffprobe -v error -select_streams v:0 -skip_frame nokey -count_frames -show_entries stream=nb_read_frames -of csv=p=0 output/hero-scrub-1080.mp4 | tr -d '\r')"
+          mobile_total="$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 output/hero-scrub-720.mp4 | tr -d '\r')"
+          mobile_keys="$(ffprobe -v error -select_streams v:0 -skip_frame nokey -count_frames -show_entries stream=nb_read_frames -of csv=p=0 output/hero-scrub-720.mp4 | tr -d '\r')"
+          printf 'total_frames=%s\nkey_frames=%s\n' "$desktop_total" "$desktop_keys" > output/desktop-keyframes.txt
+          printf 'total_frames=%s\nkey_frames=%s\n' "$mobile_total" "$mobile_keys" > output/mobile-keyframes.txt
+
+          test "$desktop_total" = "241"
+          test "$desktop_keys" = "$desktop_total"
+          test "$mobile_total" = "241"
+          test "$mobile_keys" = "$mobile_total"
+
+          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-1080.mp4 -lavfi ssim -f null - 2>&1 | tee output/desktop-ssim.txt
+          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-1080.mp4 -lavfi psnr -f null - 2>&1 | tee output/desktop-psnr.txt
+          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-720.mp4 -lavfi "[0:v]scale=1280:720:flags=lanczos[ref];[ref][1:v]ssim" -f null - 2>&1 | tee output/mobile-ssim.txt
+          ffmpeg -hide_banner -i hero-source.mp4 -i output/hero-scrub-720.mp4 -lavfi "[0:v]scale=1280:720:flags=lanczos[ref];[ref][1:v]psnr" -f null - 2>&1 | tee output/mobile-psnr.txt
+
           sha256sum output/* > output/SHA256SUMS.txt
-          grep -q '^ *241 1' output/desktop-keyframes.txt
-          grep -q '^ *241 1' output/mobile-keyframes.txt
           ls -lh output
 
       - name: Upload optimized media
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sharetech-scrub-media-verified
